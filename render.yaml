@@ -1,0 +1,44 @@
+services:
+  - type: web
+    name: hotel-revenue-intelligence-api
+    runtime: docker
+    plan: free
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: HRI_ENVIRONMENT
+        value: production
+      - key: HRI_CORS_ORIGINS
+        value: '["https://hotel-revenue-intelligence-web.onrender.com"]'
+      - key: DATABASE_URL
+        fromDatabase:
+          name: hotel-revenue-intelligence-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: hotel-revenue-intelligence-redis
+          property: connectionString
+
+  - type: web
+    name: hotel-revenue-intelligence-web
+    runtime: docker
+    plan: free
+    rootDir: frontend
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: NEXT_PUBLIC_API_BASE_URL
+        value: https://hotel-revenue-intelligence-api.onrender.com
+
+  - type: redis
+    name: hotel-revenue-intelligence-redis
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []
+
+databases:
+  - name: hotel-revenue-intelligence-db
+    plan: free
+    databaseName: hotel_revenue_intelligence
+    user: hri

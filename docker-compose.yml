@@ -1,0 +1,40 @@
+services:
+  api:
+    build:
+      context: ./backend
+    environment:
+      HRI_ENVIRONMENT: development
+      HRI_CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000"]'
+    ports:
+      - "8000:8000"
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hri
+      POSTGRES_PASSWORD: hri
+      POSTGRES_DB: hotel_revenue_intelligence
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+volumes:
+  postgres-data:
