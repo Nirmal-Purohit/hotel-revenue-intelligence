@@ -30,6 +30,8 @@ services:
     envVars:
       - key: NEXT_PUBLIC_API_BASE_URL
         value: https://hotel-revenue-intelligence-api.onrender.com
+      - key: PORT
+        value: 3000
 
   - type: redis
     name: hotel-revenue-intelligence-redis
