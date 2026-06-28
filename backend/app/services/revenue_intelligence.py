@@ -143,29 +143,92 @@ def recommend_price(request: PriceRecommendationRequest) -> PriceRecommendation:
 
     recommended_price = round(current_price * (1 + total_lift), 2)
     expected_revenue = round(recommended_price * base["expected_rooms_sold"], 2)
-    confidence = round(0.64 + min(base["market_demand_index"], 0.9) * 0.24 - abs(total_lift) * 0.16, 2)
+
+    # Dynamic confidence — penalised by booking window (far-out = uncertain),
+    # extreme price swings, and low demand signal strength; rewarded by
+    # stable pace and strong demand.
+    days_until = max((stay_date - date.today()).days, 0)
+    booking_window_penalty = min(days_until / 90, 1.0) * 0.10   # up to -10% for 90-day horizon
+    swing_penalty = min(abs(total_lift) * 0.25, 0.08)            # up to -8% for large price moves
+    pace_bonus = 0.04 if abs(pace.variance) <= 2 else 0.0        # +4% when pace is stable
+    demand_score = min(base["market_demand_index"], 0.95) * 0.22 # up to +21% for strong demand
+    confidence = round(
+        min(max(0.58 + demand_score + pace_bonus - booking_window_penalty - swing_penalty, 0.50), 0.95),
+        2,
+    )
+
+    # Price direction helper
+    price_direction = "raising" if total_lift > 0 else "lowering"
+    price_change_pct = abs(total_lift) * 100
+
+    # Occupancy explanation
+    occ_vs_target = base["expected_occupancy"] - 0.68
+    if occ_vs_target > 0.06:
+        occ_detail = (
+            f"Forecast occupancy is {base['expected_occupancy']:.0%} — "
+            f"{occ_vs_target:.0%} above the 68% target threshold. "
+            f"High fill rate supports {price_direction} price by {abs(occupancy_lift) * 100:.1f}%."
+        )
+    elif occ_vs_target < -0.06:
+        occ_detail = (
+            f"Forecast occupancy is {base['expected_occupancy']:.0%} — "
+            f"{abs(occ_vs_target):.0%} below the 68% target threshold. "
+            f"Weak fill rate is pulling price down by {abs(occupancy_lift) * 100:.1f}%."
+        )
+    else:
+        occ_detail = (
+            f"Forecast occupancy is {base['expected_occupancy']:.0%}, close to the 68% target. "
+            f"Occupancy has a near-neutral effect ({occupancy_lift * 100:+.1f}%) on this recommendation."
+        )
+
+    # Booking pace explanation
+    if pace.variance > 2:
+        pace_detail = (
+            f"Bookings are {pace.variance} rooms ahead of expected pace for this date. "
+            f"Strong early demand justifies a {pace_lift * 100:.1f}% price uplift."
+        )
+    elif pace.variance < -2:
+        pace_detail = (
+            f"Bookings are {abs(pace.variance)} rooms behind expected pace. "
+            f"Sluggish pickup is applying a {abs(pace_lift) * 100:.1f}% downward pressure on price."
+        )
+    else:
+        pace_detail = (
+            f"Bookings are within {abs(pace.variance)} room(s) of expected pace — on track. "
+            f"Pace has a minimal effect ({pace_lift * 100:+.1f}%) on this recommendation."
+        )
+
+    # Demand index explanation
+    signals = demand_signals(stay_date, hotel_id)
+    demand_detail = (
+        f"Market demand index is {base['market_demand_index']:.2f}/1.00 "
+        f"(event: {signals.event_score:.2f}, festival: {signals.festival_score:.2f}, "
+        f"weather: {signals.weather_score:.2f}). "
+        f"This is {'above' if base['market_demand_index'] >= 0.55 else 'below'} the 0.55 baseline, "
+        f"contributing {demand_lift * 100:+.1f}% to the final price."
+    )
+
+    # Competitor explanation
+    comp_diff = competitor_avg - current_price
+    comp_diff_pct = (comp_diff / current_price) * 100
+    if comp_diff > 0:
+        comp_detail = (
+            f"Competitors average INR {competitor_avg:,.0f} — "
+            f"INR {comp_diff:,.0f} ({comp_diff_pct:.1f}%) above our current price of INR {current_price:,.0f}. "
+            f"Room to raise: applying a {competitor_lift * 100:.1f}% uplift."
+        )
+    else:
+        comp_detail = (
+            f"Competitors average INR {competitor_avg:,.0f} — "
+            f"INR {abs(comp_diff):,.0f} ({abs(comp_diff_pct):.1f}%) below our current price of INR {current_price:,.0f}. "
+            f"Competitive pressure applying a {abs(competitor_lift) * 100:.1f}% downward adjustment."
+        )
 
     explanations = [
-        PricingExplanation(
-            factor="Occupancy forecast",
-            impact=round(occupancy_lift, 3),
-            detail=f"Expected occupancy is {base['expected_occupancy']:.0%} for this stay date.",
-        ),
-        PricingExplanation(
-            factor="Booking pace",
-            impact=round(pace_lift, 3),
-            detail=f"Current bookings are {abs(pace.variance)} rooms {'above' if pace.variance >= 0 else 'below'} expected pace.",
-        ),
-        PricingExplanation(
-            factor="Market demand index",
-            impact=round(demand_lift, 3),
-            detail=f"Composite demand score is {base['market_demand_index']:.2f}.",
-        ),
-        PricingExplanation(
-            factor="Competitor pricing",
-            impact=round(competitor_lift, 3),
-            detail=f"Competitor average listed price is INR {competitor_avg:,.0f}.",
-        ),
+        PricingExplanation(factor="Occupancy forecast", impact=round(occupancy_lift, 3), detail=occ_detail),
+        PricingExplanation(factor="Booking pace", impact=round(pace_lift, 3), detail=pace_detail),
+        PricingExplanation(factor="Market demand index", impact=round(demand_lift, 3), detail=demand_detail),
+        PricingExplanation(factor="Competitor pricing", impact=round(competitor_lift, 3), detail=comp_detail),
     ]
 
     return PriceRecommendation(
