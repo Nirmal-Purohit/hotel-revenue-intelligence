@@ -68,25 +68,79 @@ def market_demand(days: int = 30, hotel_id: str = "HRI-BLR-001") -> list[MarketD
 
 
 def booking_pace(days: int = 30, hotel_id: str = "HRI-BLR-001", room_type: str | None = None) -> list[BookingPacePoint]:
+    """
+    Realistic booking pace using an S-curve pickup model.
+
+    The booking curve in hospitality is not linear — most rooms book within
+    21 days of the stay date. Expected bookings at any point in time follow
+    an S-curve: slow pickup far out, accelerating in the 30-day window,
+    heavy in the last 7 days.
+
+    We simulate 'actual' bookings as where we are on that curve today, then
+    compare against where we *should* be for a date with this demand profile.
+    Weekends and high-demand dates should be tracking ahead; quiet mid-week
+    dates should be tracking behind or on track.
+    """
+    import math
+
     hotel_id = _valid_hotel_id(hotel_id)
     rooms = rooms_for(hotel_id)
     selected_rooms = [room_type] if room_type else list(rooms)
     points: list[BookingPacePoint] = []
+
     for stay_date in date_range(days):
         for selected_room in selected_rooms:
             if selected_room not in rooms:
                 continue
+
             room = rooms[selected_room]
             base = forecast_for(stay_date, hotel_id, selected_room)
-            expected = round(room["total_rooms"] * base["expected_occupancy"] * 0.58)
-            variance = round((base["market_demand_index"] - 0.54) * 13)
-            actual = max(expected + variance, 0)
-            if variance <= -3:
+            signals = demand_signals(stay_date, hotel_id)
+            days_until = max((stay_date - date.today()).days, 0)
+
+            # S-curve pickup: what fraction of final bookings are typically
+            # on the books N days before arrival.
+            # At 60+ days: ~15%, at 30 days: ~40%, at 14 days: ~65%,
+            # at 7 days: ~82%, at 1 day: ~95%
+            pickup_fraction = 1.0 / (1.0 + math.exp(0.15 * (days_until - 18)))
+            pickup_fraction = round(min(max(pickup_fraction, 0.05), 0.97), 3)
+
+            # Expected bookings = final forecast × pickup fraction
+            final_rooms = base["expected_rooms_sold"]
+            expected = round(final_rooms * pickup_fraction)
+
+            # Actual bookings vary by demand signals and day-of-week.
+            # High-demand dates (events, weekends) book faster than the curve —
+            # they track ahead. Quiet mid-week dates book slower — they lag.
+            is_weekend = stay_date.weekday() >= 5
+            weekend_boost = 0.12 if is_weekend else -0.06
+            event_boost = (signals.event_score - 0.5) * 0.18
+            festival_boost = (signals.festival_score - 0.3) * 0.10
+
+            # Deterministic noise so the same date always gives the same result
+            import random as _random
+            rng = _random.Random(f"pace-{stay_date.isoformat()}-{hotel_id}-{selected_room}")
+            noise = rng.uniform(-0.05, 0.05)
+
+            actual_fraction = pickup_fraction * (1.0 + weekend_boost + event_boost + festival_boost + noise)
+            actual_fraction = round(min(max(actual_fraction, 0.02), 0.99), 3)
+            actual = round(final_rooms * actual_fraction)
+
+            variance = actual - expected
+
+            # Status thresholds are proportional to room count so a 3-room
+            # variance on a 12-room suite category isn't the same weight as
+            # 3 rooms on a 72-room deluxe category.
+            total_rooms = room["total_rooms"]
+            threshold = max(round(total_rooms * 0.05), 2)   # 5% of inventory, min 2
+
+            if variance <= -threshold:
                 status = "behind"
-            elif variance >= 3:
+            elif variance >= threshold:
                 status = "ahead"
             else:
                 status = "on_track"
+
             points.append(
                 BookingPacePoint(
                     stay_date=stay_date,
@@ -96,7 +150,7 @@ def booking_pace(days: int = 30, hotel_id: str = "HRI-BLR-001", room_type: str |
                     room_type=selected_room,
                     actual_bookings=actual,
                     expected_bookings=expected,
-                    variance=actual - expected,
+                    variance=variance,
                     status=status,
                 )
             )
