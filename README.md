@@ -70,6 +70,31 @@ render.yaml
 ```
 
 ---
+## Model & Evaluation
+
+The current pricing engine is a **weighted scoring model** combining four 
+signals (see table below). It was designed to be interpretable first — 
+every recommendation maps directly to a named factor with an explicit weight, 
+making it auditable by revenue managers without a data science background.
+
+**Confidence scores** decay with forecast horizon: recommendations within 
+7 days carry ~85–90% confidence; at 30 days this falls to ~75%; at 90 days 
+to ~65%. The decay reflects genuine uncertainty growth in occupancy and 
+competitor pricing signals at longer horizons.
+
+**Occupancy forecasts** use a seasonality-weighted historical average 
+with booking pace correction — a baseline method chosen deliberately so 
+the signal logic remains transparent. The roadmap upgrades this to 
+XGBoost / LightGBM with SHAP explainability once live PMS data is 
+available for proper training and evaluation.
+
+**Synthetic data note:** The platform currently runs on synthetically 
+generated data calibrated to realistic Indian hotel market patterns 
+(seasonal demand curves, OTA vs direct mix, segment ADR ratios). 
+Evaluation against a held-out 20% time slice shows forecasts within 
+acceptable range for the purpose of demonstrating the recommendation engine.
+
+
 
 ## Pricing Intelligence — How It Works
 
