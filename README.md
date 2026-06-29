@@ -129,9 +129,7 @@ pnpm run dev
 docker compose up --build
 ```
 
-Open:
-- Dashboard → http://localhost:3000
-- API docs → http://localhost:8000/docs
+
 
 ---
 
