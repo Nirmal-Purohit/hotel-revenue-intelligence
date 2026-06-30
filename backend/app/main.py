@@ -16,5 +16,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Root health endpoint (no /api prefix)
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+# All other routes with /api prefix
 app.include_router(router, prefix="/api")
 
