@@ -11,7 +11,7 @@ export async function getDashboard(filters?: DashboardFilters): Promise<Dashboar
   const query = params.size ? `?${params.toString()}` : "";
 
   try {
-    const response = await fetch(`${apiBaseUrl}/dashboard${query}`, { cache: "no-store" });
+    const response = await fetch(`${apiBaseUrl}/api/dashboard${query}`, { cache: "no-store" });
     if (!response.ok) {
       throw new Error(`API returned ${response.status}`);
     }
